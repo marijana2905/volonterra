@@ -1,0 +1,29 @@
+.minimal-tiptap-editor .ProseMirror ol,
+.minimal-tiptap-content ol {
+  @apply list-decimal;
+}
+
+.minimal-tiptap-editor .ProseMirror ol ol,
+.minimal-tiptap-content ol ol {
+  list-style: lower-alpha;
+}
+
+.minimal-tiptap-editor .ProseMirror ol ol ol,
+.minimal-tiptap-content ol ol ol {
+  list-style: lower-roman;
+}
+
+.minimal-tiptap-editor .ProseMirror ul,
+.minimal-tiptap-content ul {
+  list-style: disc;
+}
+
+.minimal-tiptap-editor .ProseMirror ul ul,
+.minimal-tiptap-content ul ul {
+  list-style: circle;
+}
+
+.minimal-tiptap-editor .ProseMirror ul ul ul,
+.minimal-tiptap-content ul ul ul {
+  list-style: square;
+}

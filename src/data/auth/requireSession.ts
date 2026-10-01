@@ -1,0 +1,17 @@
+import { cache } from 'react';
+import { auth } from '@/lib/auth';
+import { headers } from 'next/headers';
+import { redirect } from 'next/navigation';
+
+// Ako korisnik nema sesiju preumeri ga na login stranicu
+export const requireSession = cache(async () => {
+  const session = await auth.api.getSession({
+    headers: await headers(),
+  });
+
+  if (!session) {
+    redirect('/auth/login');
+  }
+
+  return session;
+});

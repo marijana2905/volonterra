@@ -1,0 +1,555 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// Enums
+enum UserRole {
+  VOLUNTEER
+  ORGANIZER
+  ADMIN
+}
+
+enum ActionStatus {
+  CREATED
+  CANCELLED
+  COMPLETED
+}
+
+enum ParticipationStatus {
+  APPLIED
+  ATTENDED
+  CANCELLED
+}
+
+enum ParticipationType {
+  INDIVIDUAL
+  TEAM
+}
+
+enum InvitationStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  CANCELED
+}
+
+enum NotificationType {
+  BASIC // jednostavna
+  TEAM_INVITE // interaktivna (renda se sa prihvati/odbij dugmicima)
+  ACTION_REMINDER
+  SYSTEM_ALERT
+}
+
+enum NotificationStatus {
+  UNREAD
+  READ
+  ARCHIVED
+}
+
+// Basic models
+model City {
+  id   String @id @default(uuid())
+  name String @unique
+
+  @@map("city")
+}
+
+model User {
+  id        String   @id @default(uuid())
+  createdAt DateTime
+  updatedAt DateTime
+
+  name            String
+  email           String    @unique
+  username        String?   @unique
+  displayUsername String?
+  emailVerified   Boolean
+  image           String?
+  role            UserRole
+  banned          Boolean?
+  banReason       String?
+  banExpires      DateTime?
+
+  sessions Session[]
+  accounts Account[]
+
+  volunteer Volunteer? @relation("UserVolunteer")
+  organizer Organizer? @relation("UserOrganizer")
+
+  // Korisnik ima vise prijava (vezano za usera zbog jednostavnosti ali vazi za volontera samo)
+  participations UserActionParticipation[]
+
+  // Korisnik moze imati vise zona interesa
+  interestZones InterestZone[]
+
+  // Korisnik moze da kreira vise tima
+  createdTeams Team[] @relation("CreatedTeams")
+
+  // Korisnik moze da bude clan vise tima
+  teamMemberships TeamMember[]
+
+  // Pozivnice za tim (moze primiti vise pozivnica)
+  teamInvitationsReceived TeamInvitation[]
+
+  // Pozivnice koje je korisnik poslao (moze poslati vise pozivnica)
+  teamInvitationsSent TeamInvitation[] @relation("InvitedBy")
+
+  notifications Notification[]
+
+  chatMessages ChatMessage[]
+
+  posts Post[]
+
+  // Pitanja koja je postavio korisnik nekoj organizaciji (moze i organizacija organizaciji da postavi pitanje)
+  questions Question[]
+
+  // Poruke koje je korisnik poslao unutar pitanja
+  questionMessages QuestionMessage[]
+
+  // Utisci koje je korisnik ostavio na akcijama na kojima je ucestvovao
+  impressions ActionImpression[]
+
+  // Komentari koje je korisnik ostavio na blogovima
+  comments Comment[]
+
+  // Lajkovi koje je korisnik ostavio organizatorima
+  organizerLikes OrganizerLike[]
+
+  @@map("user")
+}
+
+// TEAMS
+model Team {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Kreator tima
+  creator   User   @relation("CreatedTeams", fields: [creatorId], references: [id], onDelete: Cascade)
+  creatorId String
+
+  // Clanovi tima
+  members TeamMember[]
+
+  name  String  @unique // naziv tima unique zbog socket-a
+  image String?
+  bio   String?
+
+  // Sve pozivnice koje je tim poslao
+  teamInvitations TeamInvitation[]
+
+  chatMessages ChatMessage[]
+
+  teamParticipations UserActionParticipation[]
+
+  @@map("team")
+}
+
+model TeamMember {
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId String
+
+  team   Team   @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  teamId String
+
+  @@id([userId, teamId])
+  @@map("team_member")
+}
+
+model TeamInvitation {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Tim za koji je pozivnica
+  team   Team   @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  teamId String
+
+  // Ko je pozvan
+  invitedUser   User   @relation(fields: [invitedUserId], references: [id], onDelete: Cascade)
+  invitedUserId String
+
+  // Ko je poslao pozivnicu
+  invitedBy   User   @relation("InvitedBy", fields: [invitedById], references: [id], onDelete: Cascade)
+  invitedById String
+
+  status InvitationStatus @default(PENDING)
+
+  @@unique([teamId, invitedUserId]) // onemogucava slanje vise pozivnica istom useru
+  @@map("team_invitation")
+}
+
+// NOTIFICATIONS
+model Notification {
+  id String @id @default(uuid())
+
+  type NotificationType
+
+  title    String // kratak naslov
+  message  String? // duži tekst (može biti null)
+  link     String? // opcionalni URL (za interaktivne notifikacije)
+  metadata Json? // fleksibilni payload (npr. { teamId, inviterId }, za svaki tip notifikacije ce se znati sta ima u payloadu)
+
+  status NotificationStatus @default(UNREAD)
+
+  createdAt DateTime  @default(now())
+  readAt    DateTime?
+
+  userId String // kome je namenjena
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("notification")
+}
+
+model ChatMessage {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  content String
+
+  team   Team   @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  teamId String
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId String
+
+  @@index([teamId, createdAt(sort: Desc)]) // za brzo pribavljanje poslednjih poruka u timu
+  @@map("chat_message")
+}
+
+model Volunteer {
+  userId    String   @id
+  createdAt DateTime
+  updatedAt DateTime
+
+  fullName      String
+  email         String  @unique
+  username      String  @unique
+  image         String?
+  phone         String?
+  bio           String?
+  facebookLink  String?
+  instagramLink String?
+  xLink         String?
+
+  workedHours Int @default(0)
+  badgeLevel  Int @default(1)
+
+  user User @relation("UserVolunteer", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("volunteer")
+}
+
+model Organizer {
+  userId    String   @id
+  createdAt DateTime
+  updatedAt DateTime
+
+  organizationName String
+  email            String  @unique
+  username         String  @unique
+  image            String?
+
+  phone         String?
+  description   String?
+  address       String?
+  website       String?
+  facebookLink  String?
+  instagramLink String?
+  xLink         String?
+  paypalLink    String?
+  bankAccount   String?
+
+  galleryImages String[] // niz URL-ova slika
+
+  verifiedByAdmin Boolean @default(false)
+
+  user User @relation("UserOrganizer", fields: [userId], references: [id], onDelete: Cascade)
+
+  actions Action[]
+
+  // Pitanja koja su upucena organizatoru
+  questions Question[]
+
+  // Lajkovi koje je ovaj organizator primio
+  likes OrganizerLike[]
+
+  // Broj lajkova (denormalizovano polje za brzo dohvatanje)
+  likesCount Int @default(0)
+
+  @@map("organizer")
+}
+
+// Lajkovi organizatora (user -> organizer)
+model OrganizerLike {
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Ko je lajkovao
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId String
+
+  // Koga je lajkovao (organizatora)
+  organizer       Organizer @relation(fields: [organizerUserId], references: [userId], onDelete: Cascade)
+  organizerUserId String
+
+  // Jedan korisnik moze lajkovati jednog organizatora samo jednom
+  @@id([userId, organizerUserId])
+  @@map("organizer_like")
+}
+
+// Pitanja organizatoru
+model Question {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  title  String
+  email  String? // za neregistrovane korisnike
+  closed Boolean @default(false) // organizator moze da zatvori razgovor unutar pitanja
+
+  // Ako je postavio logovani korisnik
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+  userId String?
+
+  // Organizacija kojoj je pitanje upuceno
+  organizer       Organizer @relation(fields: [organizerUserId], references: [userId], onDelete: Cascade)
+  organizerUserId String
+
+  // Sve poruke u okviru ovog pitanja
+  messages QuestionMessage[]
+
+  @@map("question")
+}
+
+// Odgovori unutar jednog pitanja
+model QuestionMessage {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  content String
+
+  // Na koje se pitanje odnosi
+  question   Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  questionId String
+
+  // Ko je poslao poruku
+  senderUser   User?   @relation(fields: [senderUserId], references: [id], onDelete: SetNull)
+  senderUserId String?
+
+  @@map("question_message")
+}
+
+model Action {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  title       String
+  slug        String @unique
+  description String
+
+  latitude  Float
+  longitude Float
+  city      String
+  address   String
+
+  fullDateFrom DateTime
+  startTime    String // Separated start time for display purposes
+  fullDateTo   DateTime
+  endTime      String // Separated end time for display purposes
+
+  bannerImage     String?
+  minParticipants Int
+  maxParticipants Int
+
+  participants Int @default(0)
+
+  status             ActionStatus @default(CREATED)
+  cancellationReason String?
+
+  categories ActionCategory[] @relation("ActionCategories")
+
+  organizer       Organizer @relation(fields: [organizerUserId], references: [userId])
+  organizerUserId String
+
+  // Akcija ima vise prijava
+  participations UserActionParticipation[]
+
+  // Akcija ima vise utisaka (komentara)
+  impressions ActionImpression[]
+
+  @@index([slug])
+  @@map("action")
+}
+
+model ActionCategory {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  name        String  @unique
+  slug        String  @unique
+  description String?
+
+  actions Action[] @relation("ActionCategories")
+
+  @@map("action_category")
+}
+
+model UserActionParticipation {
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  type   ParticipationType   @default(INDIVIDUAL)
+  status ParticipationStatus @default(APPLIED)
+
+  user   User   @relation(fields: [userId], references: [id])
+  userId String
+
+  action   Action @relation(fields: [actionId], references: [id])
+  actionId String
+
+  team   Team?   @relation(fields: [teamId], references: [id])
+  teamId String?
+
+  isUserTeamCreator Boolean? // Ovaj flag sluzi da moze samo kreator tima da menja status prijave (svim clanovima tima je isti status)
+
+  @@id([userId, actionId])
+  @@map("user_action_participation")
+}
+
+// Komentari na akciji (utisci ucesnika)
+model ActionImpression {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  rating  Int
+  comment String
+
+  user   User   @relation(fields: [userId], references: [id])
+  userId String
+
+  action   Action @relation(fields: [actionId], references: [id])
+  actionId String
+
+  @@unique([userId, actionId]) // jedan korisnik moze ostaviti samo jedan utisak po akciji
+  @@map("action_impression")
+}
+
+model InterestZone {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  name      String
+  latitude  Float
+  longitude Float
+  radius    Int // Radius in kilometers
+
+  user   User   @relation(fields: [userId], references: [id])
+  userId String
+
+  @@map("interest_zone")
+}
+
+model Session {
+  id        String   @id @default(uuid())
+  createdAt DateTime
+  updatedAt DateTime
+
+  expiresAt      DateTime
+  token          String   @unique
+  ipAddress      String?
+  userAgent      String?
+  impersonatedBy String?
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("session")
+}
+
+model Account {
+  id        String   @id @default(uuid())
+  createdAt DateTime
+  updatedAt DateTime
+
+  providerId            String
+  accountId             String
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("account")
+}
+
+model Verification {
+  id        String    @id @default(uuid())
+  createdAt DateTime?
+  updatedAt DateTime?
+
+  identifier String
+  value      String
+  expiresAt  DateTime
+
+  @@map("verification")
+}
+
+model Post {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  title    String
+  slug     String   @unique
+  content  String
+  image    String?
+  keywords String[]
+
+  isBanned Boolean @default(false)
+
+  author   User   @relation(fields: [authorId], references: [id])
+  authorId String
+
+  comments Comment[]
+
+  @@map("post")
+}
+
+model Comment {
+  id        String   @id @default(uuid())
+  content   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  author   User   @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  authorId String
+
+  post   Post   @relation(fields: [postId], references: [id], onDelete: Cascade)
+  postId String
+
+  parent   Comment?  @relation("ParentChild", fields: [parentId], references: [id], onDelete: Cascade)
+  children Comment[] @relation("ParentChild")
+  parentId String?
+
+  @@map("comment")
+}
